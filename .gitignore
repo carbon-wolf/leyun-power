@@ -1,0 +1,10 @@
+# 运行时数据（user_id 缓存、上次巡检/提醒时间戳）
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 本机安装元数据与个人配置（含明文密码，绝对不要提交）
+.ncqqpy-plugin.json
+config.json
+.venv/
