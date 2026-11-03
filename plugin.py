@@ -51,7 +51,7 @@ class LeyunPowerPlugin(PluginBase):
     name = "leyun_power"
     version = "2.3.0"
     description = "乐云一卡通水电费：定时巡检，余额不足自动提醒到群（文案可自定义、可 @全体/个人、支持短信校验）"
-    author = "cw"
+    author = "carbon-wolf"
 
     # ------------------------------------------------------------------ 配置
 
@@ -275,7 +275,7 @@ class LeyunPowerPlugin(PluginBase):
         return str(getattr(event, "user_id", "") or "") in owners
 
     def claim_owner(self, event) -> None:
-        """首次 bind 时把操作者记为 owner。"""
+        """首次 login 时把操作者记为 owner。"""
         uid = str(getattr(event, "user_id", "") or "")
         if uid and not self.owner_users():
             self.update_config("owner_users", [uid])

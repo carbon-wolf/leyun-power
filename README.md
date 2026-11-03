@@ -12,7 +12,7 @@
 
 ```bash
 cd /path/to/ncqqpy
-git clone <本仓库地址> plugins/leyun_power
+git clone https://github.com/carbon-wolf/leyun-power.git plugins/leyun_power
 pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 
 # 然后 QQ 私聊机器人：
