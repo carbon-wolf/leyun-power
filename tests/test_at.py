@@ -4,7 +4,7 @@
 跑法：
     python test_leyunpower_at.py
 
-用**真实的** `napcat.message` / `napcat.scope` / `napcat.command`（从 D:\\model\\ncqqpy 导入），
+用**真实的** `napcat.message` / `napcat.subscribe` / `napcat.command`（从 D:\\model\\ncqqpy 导入），
 只把 `napcat.plugin.PluginBase` 换成轻量桩 —— 这样 `MessageChain` 生成的 at 段是真段，
 能验证「{@全体成员}」确实变成了 `[CQ:at,qq=all]`，而不是留在文本里。
 """
@@ -26,7 +26,7 @@ sys.path.insert(0, NCQQPY)
 import napcat  # noqa: E402
 import napcat.command  # noqa: E402,F401
 import napcat.message  # noqa: E402
-import napcat.scope  # noqa: E402,F401
+import napcat.subscribe  # noqa: E402,F401
 from napcat.message import MessageChain  # noqa: E402
 
 

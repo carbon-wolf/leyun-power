@@ -17,7 +17,7 @@ import types
 
 # --------------------------------------------------- 真实 napcat + 轻量桩
 #
-# 消息段 / Scope / 命令 Schema 一律用框架真实实现（避免桩和框架走偏），
+# 消息段 / Subscription / 命令 Schema 一律用框架真实实现（避免桩和框架走偏），
 # 只把 PluginBase 换成轻量桩，好让测试能直接拿到注册表与发送记录。
 
 sys.path.insert(0, r"D:\model\ncqqpy")

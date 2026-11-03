@@ -8,13 +8,16 @@
 移私聊 / 间隔 / 冷却 / 模板 / 失败模板 / 预览` 全部在这里分流，不为它们各注册
 一条子命令。提醒文案也不写死在代码里，见 `content.py`。
 
-`scope` 管的是**另一层**：谁能用这个插件（服务范围白名单，口径见
-`napcat.scope`）。它跟 `push_groups` / `push_users`（推给谁）不是一回事，
+`scope` 管的是**另一层**：谁能用这个插件（订阅名单，口径见
+`napcat.subscribe`）。它跟 `push_groups` / `push_users`（推给谁）不是一回事，
 管理命令只对超管开放。
 """
 from __future__ import annotations
 
-from napcat.scope import parse_ids
+try:  # 新框架
+    from napcat.subscribe import parse_ids
+except ImportError:  # 旧框架（scope 时代）
+    from napcat.scope import parse_ids
 
 from .. import content
 from ..api import (PTYPE_POWER, PTYPE_WATER, LeyunAuthError, LeyunClient,

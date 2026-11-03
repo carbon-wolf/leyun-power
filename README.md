@@ -150,8 +150,8 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 
 跟「推给谁」（`push_groups` / `push_users`）是**两层**：推送目标只决定提醒发给谁，
 不决定谁能发命令。谁能用由 `binding` 白名单决定，口径与框架的
-[`napcat.scope`](https://github.com/Green1423/ncqqpy/blob/main/docs/plugin-dev/20-scope.md)
-一致。
+[`napcat.subscribe`](https://github.com/Green1423/ncqqpy/blob/main/docs/plugin-dev/20-subscribe.md)
+一致（旧框架里这个模块叫 `napcat.scope`，语义相同）。
 
 | 写法 | 效果 |
 |---|---|
@@ -368,7 +368,7 @@ python tests/test_logic.py
 python tests/test_at.py
 ```
 
-两套都用框架真实的 `napcat.message` / `napcat.scope` / `napcat.command`，只把
+两套都用框架真实的 `napcat.message` / `napcat.subscribe` / `napcat.command`，只把
 `PluginBase` 换成轻量桩，所以 at 段、Schema 校验都是真跑的。
 
 找不到框架时设 `NCQQPY_HOME=/path/to/ncqqpy`。想跑真实登录（会用到你的账号）：

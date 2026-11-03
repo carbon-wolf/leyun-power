@@ -14,7 +14,8 @@
 不再为每个设置项注册一条子命令：`/leyun config` 的 `spec` 可变参数里分流，
 既不占顶层命令空间（这个 bot 还挂着别的插件），也只有一个帮助页要维护。
 
-服务范围（谁能用）走框架的 `napcat.scope`，与 ai_chat / bupt_news / byrdocs /
+服务范围（谁能用）走框架的订阅名单（新框架 `napcat.subscribe.Subscription`，
+旧框架 `napcat.scope.Scope`，两者同一套语义），与 ai_chat / bupt_news / byrdocs /
 oj_bank 同一口径；本文件只负责「这道闸门装在哪」，判定与配置在 `commands/setup.py`。
 
 这里只放「装配」和底层能力（配置读写、客户端、查询、推送）；面向用户的命令
@@ -27,7 +28,11 @@ import time
 
 from napcat.message import MessageChain
 from napcat.plugin import PluginBase
-from napcat.scope import Scope
+
+try:  # 新框架：Scope 已改名 Subscription（napcat.scope 仅留兼容别名）
+    from napcat.subscribe import Subscription
+except ImportError:  # 旧框架：仍叫 Scope
+    from napcat.scope import Scope as Subscription
 
 from . import content
 from .api import (DEFAULT_ACCESS_TOKEN, DEFAULT_API_ID, VERIFY_MARK,
@@ -50,7 +55,7 @@ class LeyunPowerPlugin(PluginBase):
     """乐云一卡通水电费巡检插件。"""
 
     name = "leyun_power"
-    version = "2.4.0"
+    version = "2.4.1"
     description = "乐云一卡通水电费：定时巡检，余额不足自动提醒到群（文案可自定义、可 @全体/个人、支持短信校验）"
     author = "carbon-wolf"
 
@@ -92,7 +97,7 @@ class LeyunPowerPlugin(PluginBase):
             "error_template": content.DEFAULT_ERROR,
             "push_groups": [],            # 群号（`/leyun config 本群` 自动加入）
             "push_users": [],             # 私聊 QQ
-            # 服务范围白名单（口径见 `napcat.scope`）：空 = 谁都不用，不回落
+            # 服务范围白名单（口径见 `napcat.subscribe`）：空 = 谁都不用，不回落
             # 框架的 `bound_groups`（那是「监听哪些群」，语义正好相反）。
             # ⚠️ 注意「推送目标」和「服务范围」是两层：加进 push_* 只影响推给谁，
             # 不让谁用；要让某个群/人能发命令，得加到这里。
@@ -345,13 +350,13 @@ class LeyunPowerPlugin(PluginBase):
 
     # ------------------------------------------------------------------ 服务范围
 
-    def _scope(self) -> Scope:
-        """服务范围（口径见 `napcat.scope` / docs/plugin-dev/20-scope.md）。
+    def _scope(self) -> Subscription:
+        """服务范围（口径见 `napcat.subscribe` / docs/plugin-dev/20-subscribe.md）。
 
         只看本插件自己的 `binding`：空 = 谁都不用，不回落框架的 `bound_groups`
         （那是「机器人监听哪些群」，空表示监听所有群，与白名单语义相反）。
         """
-        return Scope.of(self.config.get("binding"))
+        return Subscription.of(self.config.get("binding"))
 
     def _scope_lists(self) -> tuple:
         """`(群号集合, QQ 集合)` —— 只给回执/日志展示用，判定一律走 `_scope()`。"""
