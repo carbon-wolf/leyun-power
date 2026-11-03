@@ -70,6 +70,7 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 | `/水电 设置 移私聊 10001` | 移出私聊提醒 |
 | `/水电 设置 间隔 30` | 巡检间隔 30 分钟（1-1440） |
 | `/水电 设置 冷却 6` | 同一项重复提醒的冷却 6 小时 |
+| `/水电 设置 免打扰 23:00-08:00` | 夜间不推送（跨零点直接写），白天第一轮巡检补发；`免打扰 关` 关闭 |
 | `/水电 设置 模板 <文案>` | **自定义余额不足提醒的文案**（见下节） |
 | `/水电 设置 模板` | 查看当前文案 + 可用变量表 |
 | `/水电 设置 模板 默认` | 恢复内置默认文案 |
@@ -227,6 +228,27 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 - 查询失败的提醒另有一套 `失败模板`，变量是 `{错误}` / `{提示}` / `{时间}`
 - 也可以直接改 `config.json` 的 `remind_template` / `error_template`（同样支持占位符）
 
+## 夜间免打扰
+
+半夜余额低了不吵人，等白天再说 —— 出厂默认就是 `23:00-08:00`。
+
+```
+/水电 设置 免打扰 23:00-08:00     # 跨零点直接写
+/水电 设置 免打扰 12:00-14:00     # 同一天内的时段也支持
+/水电 设置 免打扰 23点到8点        # 中文「到」、只写小时都认
+/水电 设置 免打扰 关               # 关掉，恢复全天推送
+/水电 设置 免打扰                  # 看当前设置
+```
+
+行为上有三个细节：
+
+- **只压推送，不压巡检**：夜里照常查，`data/state.json` 里的余额是新的，只是不发消息；
+- **不写冷却**：免打扰期间跳过的提醒不占 6 小时冷却，所以 `08:00` 之后**第一轮巡检**
+  就会把攒下的提醒发出去（最多晚一个巡检间隔，默认 30 分钟）；
+- **失败提醒也一起静音**：半夜登录失败不会连着刷屏，白天汇总成一条。
+
+想让早上更准点，把 `巡检间隔` 调小一点，比如 `/水电 设置 间隔 10`。
+
 ## 配置
 
 插件构造期会把**全部**配置项写进 `config.json` 的 `plugins.leyun_power` 段（只补缺键、
@@ -248,6 +270,7 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
   "rooms": [],
   "check_interval": 1800,
   "remind_cooldown_hours": 6,
+  "quiet_hours": {"start": "23:00", "end": "08:00"},
   "remind_template": "🔔 水电余额不足\n\n{房间} — {项目}\n剩余 {剩余} {单位} · 余额 {余额} 元 · 单价 {单价} 元/{单位}\n⚠️ 已低于提醒阈值 {阈值} 元，记得充值",
   "error_template": "⚠️ 水电查询失败\n{提示}\n{错误}",
   "push_groups": [],
@@ -266,6 +289,9 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 - `threshold`：键是 `pay_proj_type`，`322`=水费、`323`=电费。
 - `rooms`：见「房间怎么填」。
 - `check_interval`：秒。定时器每 60 秒醒一次，到点才真巡检，所以改这个值立刻生效。
+- `quiet_hours`：夜间免打扰时段，`{"start": "23:00", "end": "08:00"}`。留空或首尾相同 =
+  不启用。只压推送不压巡检 —— 夜里照常查，余额是新的，只是不发消息；
+  **也不写冷却**，所以时段结束后第一轮巡检就会把攒下的提醒补发出去。
 - `remind_template` / `error_template`：推送文案模板，留空则用内置默认。
 - 运行期状态（`user_id` 缓存、上次巡检 / 提醒时间）落在 `data/state.json`，不进配置。
 

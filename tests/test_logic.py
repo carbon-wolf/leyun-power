@@ -156,6 +156,9 @@ def make_plugin(account=None, push_groups=None, owner=None, rooms=None) -> Leyun
         cfg["owner_users"] = list(owner)
     if rooms:
         cfg["rooms"] = list(rooms)
+    # 免打扰默认是 23:00-08:00；测试要跑在任意时刻都一致，这里先关掉，
+    # 免打扰的判断另有专项（quiet_tests）
+    cfg["quiet_hours"] = {"start": "", "end": ""}
     plugin.config = FakeConfig(cfg)
     plugin.api = FakeApi(plugin)
     return plugin
@@ -467,6 +470,72 @@ async def bind_tests() -> bool:
     return ok
 
 
+async def quiet_tests() -> bool:
+    """夜间免打扰：时段判断 / 命令设置 / 时段内攒着不推（也不写冷却）。"""
+    import time as _time
+
+    def at(hour, minute):
+        return _time.mktime((2026, 11, 3, hour, minute, 0, 0, 0, -1))
+
+    print("\n== 16. 夜间免打扰 ==")
+    plugin = make_plugin(owner=["10001"])
+    cmds = await boot(plugin)
+
+    msg = await cmds["leyun.config"](Params(spec=["免打扰"]), Event())
+    ok = check("未开启" in msg, "默认先关掉测试插件，面板说「未开启」")
+
+    msg = await cmds["leyun.config"](Params(spec=["免打扰", "23:00-08:00"]), Event())
+    print("  " + msg.replace("\n", "\n  "))
+    ok &= check(plugin.config.data["quiet_hours"] == {"start": "23:00", "end": "08:00"},
+                "跨零点时段已写入：%s" % plugin.config.data["quiet_hours"])
+
+    cases = [(23, 30, True), (1, 0, True), (7, 59, True),
+             (8, 0, False), (12, 0, False), (22, 59, False)]
+    for hour, minute, want in cases:
+        got = plugin.in_quiet_hours(at(hour, minute))
+        ok &= check(got is want, "%02d:%02d → 免打扰=%s" % (hour, minute, got))
+
+    msg = await cmds["leyun.config"](Params(spec=["免打扰", "12点到14点"]), Event())
+    ok &= check(plugin.config.data["quiet_hours"] == {"start": "12:00", "end": "14:00"},
+                "中文「到」与省略分钟也能解析")
+    ok &= check(plugin.in_quiet_hours(at(13, 0)) and not plugin.in_quiet_hours(at(11, 59)),
+                "同日时段判断正确")
+
+    for bad in ("25:00-08:00", "23:00-23:00", "2300-0800"):
+        got = await cmds["leyun.config"](Params(spec=["免打扰", bad]), Event())
+        ok &= check(isinstance(got, tuple) and got[0] == "_schema_error",
+                    "非法时段 %s 被拒" % bad)
+
+    print("\n== 17. 免打扰期间：攒着不发，白天立刻补 ==")
+    plugin = make_plugin(account=("10000000000", "000000"),
+                         push_groups=["100200300"], owner=["10001"])
+    cmds = await boot(plugin)
+    _install_fake_bills(plugin)
+    plugin.config.data["threshold"] = {"322": 9999.0, "323": 9999.0}
+    plugin.config.data["quiet_hours"] = {"start": "23:00", "end": "08:00"}
+    plugin.state.set("last_remind", {})
+    from leyun_power.jobs import patrol
+
+    plugin.in_quiet_hours = lambda now=None: True
+    summary = await patrol.check_once(plugin)
+    print("  " + summary)
+    ok &= check(len(plugin.sent) == 0, "时段内一条都不发")
+    ok &= check("免打扰" in summary, "摘要说明是免打扰而不是发失败")
+    ok &= check(not plugin.state.get("last_remind"),
+                "时段内不写冷却：%s" % plugin.state.get("last_remind"))
+
+    plugin.in_quiet_hours = lambda now=None: False
+    await patrol.check_once(plugin)
+    ok &= check(len(plugin.sent) == 2, "时段结束后第一轮就补发（%d 条）" % len(plugin.sent))
+
+    msg = await cmds["leyun.config"](Params(spec=["免打扰", "关"]), Event())
+    ok &= check(plugin.quiet_text() == "" and "已关闭" in msg, "可以关掉：%s" % msg)
+
+    panel = await cmds["leyun.config"](Params(spec=[]), Event())
+    ok &= check("夜间免打扰" in panel, "设置面板显示免打扰状态")
+    return ok
+
+
 async def live_tests(tel: str, pwd: str) -> bool:
     print("\n== 14. 真实链路：login → bind → query → 巡检 ==")
     rooms = json.loads(os.environ.get("LEYUN_ROOMS") or "[]")
@@ -498,6 +567,7 @@ async def main() -> int:
     ok &= await template_tests()
     ok &= await verify_tests()
     ok &= await bind_tests()
+    ok &= await quiet_tests()
     if "--live" in sys.argv:
         idx = sys.argv.index("--live")
         ok &= await live_tests(sys.argv[idx + 1], sys.argv[idx + 2])

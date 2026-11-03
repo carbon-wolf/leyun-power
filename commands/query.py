@@ -84,6 +84,11 @@ def remind_hint(plugin, results: list) -> str:
         return ("⚠️ %s 已低于阈值，但现在不会提醒：\n%s"
                 % ("、".join(low), "\n".join(blocked)))
 
+    if plugin.in_quiet_hours():
+        return ("🌙 现在是免打扰时段（%s），低于阈值也先不发；"
+                "%s 之后第一轮巡检会补上"
+                % (plugin.quiet_text(), plugin.quiet_until()))
+
     targets = []
     if groups:
         targets.append("群 " + "、".join(groups))

@@ -42,8 +42,12 @@ async def check_once(plugin) -> str:
         if threshold > 0 and bill["surplus_amt"] <= threshold:
             alerts.append((_alert_key(room), room, bill))
 
+    # 免打扰时段照常查（余额是新的），但一条都不推 —— 也**不记冷却**，
+    # 于是白天第一轮巡检会立刻把夜里攒下的提醒发出去。
+    quiet = plugin.in_quiet_hours(now)
+
     pushed = 0
-    if alerts and plugin.config.get("enabled", True):
+    if alerts and plugin.config.get("enabled", True) and not quiet:
         for key, room, bill in alerts:
             if not _cooled_down(plugin, key, now):
                 continue
@@ -62,7 +66,7 @@ async def check_once(plugin) -> str:
 
     if errors:
         plugin.state.set("last_err", time.strftime("%m-%d %H:%M") + " " + "；".join(errors))
-        if _cooled_down(plugin, "__error__", now):
+        if not quiet and _cooled_down(plugin, "__error__", now):
             # 失败原因决定提示：需要短信校验就直说去哪做，别让用户猜密码是不是错了
             sent = await plugin.push(
                 plugin.error_text(errors, plugin.verify_hint(errors)))
@@ -78,7 +82,10 @@ async def check_once(plugin) -> str:
     summary = "巡检完成：%d 项成功" % (len(results) - len(errors))
     if alerts:
         summary += "，%d 项低于阈值，推送 %d 条" % (len(alerts), pushed)
-        if not pushed and not any(plugin.push_targets()):
+        if quiet:
+            summary += "（免打扰 %s 中，攒到 %s 之后发）" % (
+                plugin.quiet_text(), plugin.quiet_until())
+        elif not pushed and not any(plugin.push_targets()):
             summary += "（⚠️ 没有推送目标，提醒发不出去）"
     if errors:
         summary += "，%d 项失败" % len(errors)

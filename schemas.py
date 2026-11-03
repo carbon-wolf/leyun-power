@@ -11,7 +11,57 @@
 """
 from __future__ import annotations
 
+import re
+
 from napcat.command import CommandSchema, StrField, VariadicField
+
+#: 时间点（`23:00` / `8:00`，全角冒号也认）
+_QUIET_TIME = re.compile(r"^(\d{1,2})\s*[:：]\s*(\d{1,2})$")
+
+#: 时段分隔符：半角/全角横线、波浪号，以及中文的「到/至」
+_QUIET_SEP = re.compile(r"[-－—–~～]|到|至")
+
+
+def quiet_minutes(value):
+    """`"23:00"` / `"23"` / `"23点"` / `"23点30"` → 分钟数；格式不对返回 None。
+
+    容忍手写习惯：全角冒号、只写小时、中文「点」「时」。
+    """
+    text = re.sub(r"点\s*(\d{1,2})", r":\1", str(value or "").strip())
+    text = text.rstrip("点时").strip()
+    match = _QUIET_TIME.match(text)
+    if match:
+        hour, minute = int(match.group(1)), int(match.group(2))
+    elif re.match(r"^\d{1,2}$", text):
+        hour, minute = int(text), 0      # 只写小时，分钟按 0 算
+    else:
+        return None
+    if hour > 23 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def quiet_clock(minutes: int) -> str:
+    """1380 → `"23:00"`。"""
+    return "%02d:%02d" % divmod(int(minutes), 60)
+
+
+def parse_quiet(text: str) -> tuple:
+    """把 `"23:00-08:00"` 解析成 `("23:00", "08:00")`。
+
+    Raises:
+        ValueError: 没有分隔符、时间点不合法、或首尾相同（那等于什么都不屏蔽）。
+    """
+    raw = _QUIET_SEP.sub("-", str(text or "").strip())
+    parts = [p.strip() for p in raw.split("-") if p.strip()]
+    if len(parts) != 2:
+        raise ValueError("时段要写成 起始-结束，例如 23:00-08:00")
+    start, end = quiet_minutes(parts[0]), quiet_minutes(parts[1])
+    if start is None or end is None:
+        raise ValueError("时间点写成 HH:MM，例如 23:00-08:00")
+    if start == end:
+        raise ValueError("起始和结束一样，等于没屏蔽；要关掉请写 /水电 设置 免打扰 关")
+    return quiet_clock(start), quiet_clock(end)
 
 
 class LoginSchema(CommandSchema):
@@ -43,8 +93,9 @@ class ConfigSchema(CommandSchema):
     spec = VariadicField(
         description="留空=查看当前配置；也可写：电 <元> / 水 <元> / 开 / 关 / "
                     "本群 / 群 <群号> / 私聊 <QQ> / 移群 <群号> / 移私聊 <QQ> / "
-                    "间隔 <分钟> / 冷却 <小时> / 模板 <文案> / 模板 默认 / "
-                    "失败模板 <文案> / 预览（文案里可写 {@全体成员} / {@QQ号}）")
+                    "间隔 <分钟> / 冷却 <小时> / 免打扰 <23:00-08:00> / "
+                    "模板 <文案> / 模板 默认 / 失败模板 <文案> / 预览"
+                    "（文案里可写 {@全体成员} / {@QQ号}）")
 
 
 class ScopeSchema(CommandSchema):
@@ -78,6 +129,7 @@ _ACTIONS = {
     "移私聊": "unuser", "移除私聊": "unuser", "unuser": "unuser",
     "间隔": "interval", "interval": "interval",
     "冷却": "cooldown", "cooldown": "cooldown",
+    "免打扰": "quiet", "夜间": "quiet", "静音": "quiet", "quiet": "quiet",
     "模板": "template", "提醒内容": "template", "提醒文案": "template",
     "template": "template",
     "失败模板": "errtemplate", "失败提醒": "errtemplate",
@@ -94,6 +146,7 @@ _NEEDS_VALUE = {
     "user": ("QQ 号", True),
     "interval": ("巡检间隔（分钟）", True),
     "cooldown": ("提醒冷却（小时）", True),
+    "quiet": ("时段（如 23:00-08:00；写 关 关闭）", False),
     "ungroup": ("群号（可写 本群）", False),
     "unuser": ("QQ 号", True),
     "template": ("文案（留空=查看；写 默认 可恢复）", False),

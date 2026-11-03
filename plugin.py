@@ -37,7 +37,8 @@ from .commands import query as query_cmd
 from .commands import setup as setup_cmd
 from .commands import verify as verify_cmd
 from .jobs import patrol as patrol_job
-from .schemas import BindSchema, ConfigSchema, LoginSchema, ScopeSchema, VerifySchema
+from .schemas import (BindSchema, ConfigSchema, LoginSchema, ScopeSchema,
+                     VerifySchema, quiet_clock, quiet_minutes)
 from .store import StateStore
 
 # 巡检定时器的唤醒周期（秒）。真正的巡检间隔由 config.check_interval 决定，
@@ -83,6 +84,9 @@ class LeyunPowerPlugin(PluginBase):
             "rooms": [],
             "check_interval": 1800,       # 巡检间隔（秒）
             "remind_cooldown_hours": 6,   # 同一项重复提醒的冷却（小时）
+            # 夜间免打扰：这段时间照常巡检（数据是新的），但不推送；白天第一轮补发。
+            # start == end 或留空 = 不启用。跨零点由判断逻辑处理（23:00-08:00 就是跨零点）。
+            "quiet_hours": {"start": "23:00", "end": "08:00"},
             # 提醒文案（占位符见 /leyun config 模板；改这里或命令改都行）
             "remind_template": content.DEFAULT_REMIND,
             "error_template": content.DEFAULT_ERROR,
@@ -287,6 +291,42 @@ class LeyunPowerPlugin(PluginBase):
             return float(th.get(str(ptype), 0) or 0)
         except (TypeError, ValueError):
             return 0.0
+
+    # ---- 夜间免打扰
+
+    def quiet_range(self):
+        """返回 `(起始分钟, 结束分钟)`；未启用返回 None。"""
+        cfg = self.config.get("quiet_hours") or {}
+        start = quiet_minutes(cfg.get("start"))
+        end = quiet_minutes(cfg.get("end"))
+        if start is None or end is None or start == end:
+            return None
+        return start, end
+
+    def in_quiet_hours(self, now: float = None) -> bool:
+        """现在是否处于免打扰时段（支持跨零点，如 23:00-08:00）。"""
+        span = self.quiet_range()
+        if span is None:
+            return False
+        stamp = time.time() if now is None else now
+        local = time.localtime(stamp)
+        current = local.tm_hour * 60 + local.tm_min
+        start, end = span
+        if start < end:                      # 同一天内，如 12:00-14:00
+            return start <= current < end
+        return current >= start or current < end   # 跨零点
+
+    def quiet_text(self) -> str:
+        """`"23:00-08:00"`；未启用返回空串（面板 / 回执展示用）。"""
+        span = self.quiet_range()
+        if span is None:
+            return ""
+        return "%s-%s" % (quiet_clock(span[0]), quiet_clock(span[1]))
+
+    def quiet_until(self) -> str:
+        """免打扰还要持续到几点的可读文本（结束时刻，如 `08:00`）。"""
+        span = self.quiet_range()
+        return quiet_clock(span[1]) if span else ""
 
     def push_targets(self) -> tuple:
         """返回 `(群号列表, QQ 列表)`。"""

@@ -19,7 +19,7 @@ from napcat.scope import parse_ids
 from .. import content
 from ..api import (PTYPE_POWER, PTYPE_WATER, LeyunAuthError, LeyunClient,
                    LeyunProtocolError, LeyunVerifyRequired)
-from ..schemas import parse_scope_spec, parse_spec
+from ..schemas import parse_quiet, parse_scope_spec, parse_spec
 from .query import format_all, room_label
 from .verify import mask_tel
 
@@ -56,6 +56,7 @@ def panel(plugin) -> str:
         "提醒阈值：电费 %.2f 元 · 水费 %.2f 元"
         % (plugin.threshold(PTYPE_POWER), plugin.threshold(PTYPE_WATER)),
         "提醒冷却：%s 小时" % cooldown,
+        "夜间免打扰：%s" % (plugin.quiet_text() or "未开启（夜里也会推）"),
         "推送群：%s" % (", ".join(groups) or "未设置（在群里发 /水电 绑定）"),
         "推送私聊：%s" % (", ".join(users) or "未设置"),
     ]
@@ -259,6 +260,9 @@ async def config(plugin, params, event) -> str:
         plugin.update_config("remind_cooldown_hours", hours)
         return "✅ 同一项提醒的冷却已设为 %s 小时" % _trim(hours)
 
+    if action == "quiet":
+        return _set_quiet(plugin, value)
+
     if action in _TEMPLATES:
         return _set_template(plugin, action, value)
 
@@ -266,6 +270,44 @@ async def config(plugin, params, event) -> str:
         return await _preview(plugin)
 
     return ("_schema_error", "看不懂「%s」" % action)
+
+
+# ---------------------------------------------------------------------- 免打扰
+
+_QUIET_OFF = ("关", "关闭", "取消", "无", "off", "disable")
+
+
+def _set_quiet(plugin, value: str) -> str:
+    """查看 / 设置 / 关闭夜间免打扰。
+
+    免打扰只压「推送」不压「巡检」：夜里照样查，余额是新的，只是不发消息；
+    时段一过第一轮巡检就把攒下的提醒发出去（不写冷却，见 patrol.check_once）。
+    """
+    raw = str(value or "").strip()
+    current = plugin.quiet_text()
+
+    if raw in _SHOW_WORDS:
+        return ("🌙 夜间免打扰\n"
+                "当前：%s\n\n"
+                "改法：/水电 设置 免打扰 23:00-08:00（跨零点直接写）\n"
+                "　　　/水电 设置 免打扰 12:00-14:00（同一天内）\n"
+                "　　　/水电 设置 免打扰 关\n\n"
+                "免打扰期间照常巡检，只是不发消息；时段结束后第一轮巡检就会补发。"
+                % (current or "未开启（夜里也会推）"))
+
+    if raw.lower() in _RESET_WORDS or raw.lower() in _QUIET_OFF:
+        plugin.update_config("quiet_hours", {"start": "", "end": ""})
+        return "✅ 已关闭夜间免打扰，任何时间都会推送"
+
+    try:
+        start, end = parse_quiet(raw)
+    except ValueError as e:
+        return ("_schema_error", str(e))
+
+    plugin.update_config("quiet_hours", {"start": start, "end": end})
+    return ("✅ 夜间免打扰已设为 %s-%s\n"
+            "这段时间照常查余额，但不发消息；%s 之后第一轮巡检把攒下的提醒补发。"
+            % (start, end, end))
 
 
 # ---------------------------------------------------------------------- 文案
