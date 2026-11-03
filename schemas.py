@@ -14,13 +14,20 @@ from __future__ import annotations
 from napcat.command import CommandSchema, StrField, VariadicField
 
 
-class BindSchema(CommandSchema):
-    """`/leyun bind <手机号> <登录密码>`"""
+class LoginSchema(CommandSchema):
+    """`/leyun login <手机号> <登录密码>` —— 仅私聊，密码不进群。"""
 
     tel = StrField(required=True, regex=r"^1\d{10}$",
                    description="一卡通绑定的手机号（11 位）")
     password = StrField(required=True, min_length=6, max_length=8,
                         description="一卡通登录密码，6-8 位（不是 6 位支付密码）")
+
+
+class BindSchema(CommandSchema):
+    """`/leyun bind [群号]` —— 把提醒绑到群：群里留空=本群，私聊要带群号。"""
+
+    group = StrField(required=False, default="", regex=r"^-?\d{4,12}$",
+                     description="群号（在群里留空即当前群；私聊必须带）")
 
 
 class VerifySchema(CommandSchema):

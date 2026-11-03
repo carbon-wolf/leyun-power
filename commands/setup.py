@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""`/leyun bind` / `/leyun config` / `/leyun scope` 的逻辑。
+"""`/leyun login` / `/leyun bind` / `/leyun config` / `/leyun scope` 的逻辑。
+
+`login` 管账号（仅私聊），`bind` 管「提醒发到哪个群」，两者互不代替 ——
+把登录密码和群号塞进同一条命令，既容易填错，也会让密码出现在群聊里。
 
 `config` 是**唯一的设置入口**：`电 / 水 / 开 / 关 / 本群 / 群 / 私聊 / 移群 /
 移私聊 / 间隔 / 冷却 / 模板 / 失败模板 / 预览` 全部在这里分流，不为它们各注册
@@ -45,7 +48,7 @@ def panel(plugin) -> str:
     if tel and len(tel) >= 7:
         account = "%s****%s" % (tel[:3], tel[-4:])
     else:
-        account = "未绑定（私聊发 /水电 绑定 <手机号> <密码>）"
+        account = "未登录（私聊发 /水电 登录 <手机号> <密码>）"
     lines = [
         "⚙️ 水电插件设置",
         "账号：%s" % account,
@@ -53,7 +56,7 @@ def panel(plugin) -> str:
         "提醒阈值：电费 %.2f 元 · 水费 %.2f 元"
         % (plugin.threshold(PTYPE_POWER), plugin.threshold(PTYPE_WATER)),
         "提醒冷却：%s 小时" % cooldown,
-        "推送群：%s" % (", ".join(groups) or "未设置（在群里发 /水电 设置 本群）"),
+        "推送群：%s" % (", ".join(groups) or "未设置（在群里发 /水电 绑定）"),
         "推送私聊：%s" % (", ".join(users) or "未设置"),
     ]
     owners = plugin.owner_users()
@@ -68,17 +71,22 @@ def panel(plugin) -> str:
     lines += [
         "",
         "改法示例：/水电 设置 电 10 · /水电 设置 水 5 · /水电 设置 开 · "
-        "/水电 设置 本群 · /水电 设置 间隔 30",
+        "/水电 设置 间隔 30",
+        "改绑群：在群里发 /水电 绑定（或 /水电 绑定 <群号>）",
         "自定义提醒：/水电 设置 模板 <文案>（发 /水电 设置 模板 看可用变量，"
         "/水电 设置 预览 看效果）",
     ]
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------- 绑定
+# ---------------------------------------------------------------------- 登录
 
-async def bind(plugin, params, event) -> str:
-    """校验账号 → 真登录一次 → 落盘 → 立刻返回当前余额。"""
+async def login(plugin, params, event) -> str:
+    """校验账号 → 真登录一次 → 落盘 → 立刻返回当前余额。
+
+    **只处理「一卡通账号」这一件事**：把账号密码换成缓存的 user_id。
+    「提醒发到哪个群」是另一件事，走 `bind_group()`。
+    """
     if not plugin.is_owner(event):
         return "这个插件已被其他人绑定（config.json → plugins.leyun_power.owner_users）"
 
@@ -99,7 +107,7 @@ async def bind(plugin, params, event) -> str:
                 "2) 收到后发 /水电 验证 <6位校验码>\n\n"
                 "校验一次以后就免验证了。" % mask_tel(tel))
     except (LeyunAuthError, LeyunProtocolError) as e:
-        return ("❌ 绑定失败：%s\n\n"
+        return ("❌ 登录失败：%s\n\n"
                 "提示：密码是一卡通「手机号登录」那个 6-8 位密码，"
                 "不是 6 位支付密码；没设过就在 App 里点「重置登录密码」。"
                 % e)
@@ -115,13 +123,65 @@ async def bind(plugin, params, event) -> str:
         text = "（登录成功，但查询失败：%s）" % e
 
     tips = []
-    groups, users = plugin.push_targets()
+    groups, _users = plugin.push_targets()
     if not groups:
-        tips.append("· 还没设提醒群：把机器人拉进宿舍群，在群里发 /水电 设置 本群")
-    if not users:
-        tips.append("· 想私聊也收提醒：/水电 设置 私聊 <你的QQ>")
-    return ("✅ 绑定成功，账号已保存\n\n" + text
+        tips.append("· 还没绑群：把机器人拉进宿舍群，在群里发 /水电 绑定")
+    return ("✅ 登录成功，账号已保存\n\n" + text
             + ("\n\n" + "\n".join(tips) if tips else ""))
+
+
+async def bind_group(plugin, params, event) -> str:
+    """把「余额不足提醒」绑到某个群：群里留空=本群，私聊/群里都能带群号。
+
+    与 `/leyun login`（账号登录）分开：这条只动「推给哪个群」，不碰账号密码。
+    绑定同时把群写进服务范围（`binding.groups`），否则下一个命令就会被
+    「名单里没这个群」挡下来 —— 用户看到的是「绑完就不能用了」。
+    """
+    if not plugin.is_owner(event):
+        return ("只有管理员能绑群（config.json → plugins.leyun_power.owner_users）\n"
+                "还没认领过的话，先在私聊发 /水电 登录 <手机号> <密码>")
+
+    raw = str(getattr(params, "group", "") or "").strip()
+    if raw:
+        group_id = _target_id(raw)
+    else:
+        group_id = str(getattr(event, "group_id", "") or "")
+        if getattr(event, "message_type", "") != "group" or not group_id:
+            return ("_schema_error",
+                    "私聊里要带群号：/水电 绑定 100200300；"
+                    "在群里直接发 /水电 绑定 就是绑当前群")
+
+    if not (group_id.lstrip("-").isdigit() and 4 <= len(group_id.lstrip("-")) <= 12):
+        return ("_schema_error", "群号要填数字，例如 /水电 绑定 100200300")
+
+    groups = _unique(plugin.push_targets()[0] + [group_id])
+    plugin.update_config("push_groups", groups)
+    plugin.update_config("enabled", True)
+    _open_scope_group(plugin, group_id)
+
+    if not plugin.account()[0]:
+        return ("✅ 已把提醒绑到群 %s，并开启自动巡检\n\n"
+                "还差一步：私聊发 /水电 登录 <手机号> <登录密码>，"
+                "把一卡通账号登上，我才能查到余额。" % group_id)
+
+    interval = plugin._int_cfg("check_interval", 1800, minimum=60) // 60
+    return ("✅ 已把提醒绑到群 %s，并开启自动巡检（每 %d 分钟）\n"
+            "余额低于阈值时我会自动在这里提醒。\n\n"
+            "换群：在新群里再发一次 /水电 绑定；取消：/水电 设置 移群 %s"
+            % (group_id, interval, group_id))
+
+
+def _open_scope_group(plugin, group_id: str) -> None:
+    """把群加进服务范围（幂等；写失败只记日志，不影响绑定本身）。"""
+    binding = _binding(plugin)
+    try:
+        number = int(str(group_id).lstrip("-"))
+    except (TypeError, ValueError):
+        return
+    if number in binding["groups"]:
+        return
+    binding["groups"] = sorted(binding["groups"] + [number])
+    plugin.update_config("binding", binding)
 
 
 # ---------------------------------------------------------------------- 设置
@@ -412,6 +472,7 @@ def _add_group(plugin, group_id: str) -> str:
     groups = _unique(plugin.push_targets()[0] + [group_id])
     plugin.update_config("push_groups", groups)
     plugin.update_config("enabled", True)
+    _open_scope_group(plugin, group_id)
     interval = plugin._int_cfg("check_interval", 1800, minimum=60) // 60
     return ("✅ 已在群 %s 提醒，并开启自动巡检（每 %d 分钟）\n"
             "余额低于阈值时我会自动在这里提醒。" % (group_id, interval))

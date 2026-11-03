@@ -57,7 +57,7 @@ async def check_once(plugin) -> str:
             else:
                 plugin.logger.warning(
                     "[leyun_power] %s 低于阈值但没发出去：没有可用的推送目标"
-                    "（/水电 设置 本群 或 /水电 设置 私聊 <QQ>）",
+                    "（/水电 绑定 或 /水电 设置 私聊 <QQ>）",
                     room.get("label") or room.get("input4", {}).get("name") or "房间")
 
     if errors:

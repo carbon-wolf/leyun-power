@@ -121,7 +121,7 @@ install_stubs()
 sys.path.insert(0, r"D:\model\leyunpower\plugins")
 
 from leyun_power import LeyunPowerPlugin          # noqa: E402
-from leyun_power.schemas import BindSchema, ConfigSchema  # noqa: E402
+from leyun_power.schemas import BindSchema, ConfigSchema, LoginSchema  # noqa: E402
 
 
 # ----------------------------------------------------------------- 事件 / 参数
@@ -180,20 +180,20 @@ async def logic_tests() -> bool:
     print("\n== 1. 注册的命令（group + bind/query/config/scope）==")
     plugin = make_plugin()
     cmds = await boot(plugin)
-    ok &= check(list(cmds) == ["leyun", "leyun.bind", "leyun.query", "leyun.config",
-                               "leyun.verify", "leyun.scope"],
+    ok &= check(list(cmds) == ["leyun", "leyun.login", "leyun.bind", "leyun.query",
+                               "leyun.config", "leyun.verify", "leyun.scope"],
                 "命令清单 = %s" % list(cmds))
     ok &= check([s[0] for s in plugin.schedules] == [60],
                 "定时器周期 %s 秒" % [s[0] for s in plugin.schedules])
     ok &= check(cmds["leyun.config"].__code__.co_varnames[:1] == ("params",),
                 "config 处理器按参数名拿 params")
 
-    print("\n== 2. 未绑定时 /水电 查 ==")
+    print("\n== 2. 未登录时 /水电 查 ==")
     print("  " + (await cmds["leyun.query"](Packet())).replace("\n", "\n  "))
 
     print("\n== 3. /水电 设置（面板）==")
     text = await cmds["leyun.config"](Params(spec=[]), Event())
-    ok &= check("未绑定" in text and "自动巡检：开" in text, "面板含账号状态与开关")
+    ok &= check("未登录" in text and "自动巡检：开" in text, "面板含账号状态与开关")
     print("  " + text.replace("\n", "\n  "))
 
     print("\n== 4. 设置阈值 / 推送群 / 间隔 ==")
@@ -231,8 +231,12 @@ async def logic_tests() -> bool:
     msg = await cmds2["leyun.config"](Params(spec=["电", "1"]), Event(user_id="10001"))
     ok &= check("管理员" in msg, "被 owner 名单拦住")
 
-    print("\n== 8. bind 参数校验（Schema 由框架负责，这里验手机号正则匹配）==")
-    ok &= check(BindSchema.__dict__.get("tel") is not None, "BindSchema 声明了 tel")
+    print("\n== 8. login / bind 的 Schema 声明 ==")
+    ok &= check(LoginSchema.__dict__.get("tel") is not None
+                and LoginSchema.__dict__.get("password") is not None,
+                "LoginSchema 声明了 tel + password")
+    ok &= check(BindSchema.__dict__.get("group") is not None,
+                "BindSchema 只声明 group（不碰密码）")
     ok &= check(ConfigSchema.__dict__.get("spec") is not None, "ConfigSchema 声明了 spec")
     return ok
 
@@ -400,7 +404,7 @@ async def verify_tests() -> bool:
     plugin = make_plugin()
     cmds = await boot(plugin)
     msg = await cmds["leyun.verify"](Params(code=""), Event())
-    ok = check("还没绑定账号" in msg, "未绑定时提示先绑定")
+    ok = check("还没登录账号" in msg, "未登录时提示先登录")
 
     plugin = make_plugin(account=("13800138000", "123456"), owner=["10001"])
     cmds = await boot(plugin)
@@ -432,8 +436,39 @@ async def verify_tests() -> bool:
     return ok
 
 
+async def bind_tests() -> bool:
+    """`/水电 绑定`：绑群（群里留空=本群 / 私聊带号 / 未登录提示 / 非管理员拒绝）。"""
+    print("\n== 15. 绑群 ==")
+    plugin = make_plugin(owner=["10001"])
+    cmds = await boot(plugin)
+
+    msg = await cmds["leyun.bind"](Params(group=""), Event(user_id="10001", group_id="100200300"))
+    print("  " + msg.replace("\n", "\n  "))
+    ok = check(plugin.config.data["push_groups"] == ["100200300"], "群里裸发 → 绑当前群")
+    ok &= check(100200300 in (plugin.config.data["binding"]["groups"] or []),
+                "绑群顺带写进服务范围：%s" % plugin.config.data["binding"]["groups"])
+    ok &= check("登录" in msg, "还没登录时回执指向 /水电 登录")
+
+    msg = await cmds["leyun.bind"](Params(group=""), Event(user_id="10001"))
+    ok &= check(isinstance(msg, tuple) and msg[0] == "_schema_error"
+                and "群号" in msg[1], "私聊裸发 → 提示带群号")
+
+    msg = await cmds["leyun.bind"](Params(group="100200400"), Event(user_id="10001"))
+    ok &= check("100200400" in plugin.config.data["push_groups"]
+                and len(plugin.config.data["push_groups"]) == 2,
+                "私聊带号 → 再加一个群：%s" % plugin.config.data["push_groups"])
+
+    await cmds["leyun.bind"](Params(group=""), Event(user_id="10001", group_id="100200300"))
+    ok &= check(plugin.config.data["push_groups"].count("100200300") == 1, "重复绑同群不重复")
+
+    stranger = await cmds["leyun.bind"](Params(group=""), Event(user_id="99999", group_id="100200500"))
+    ok &= check("管理员" in stranger, "非 owner 绑群被拒")
+    ok &= check("100200500" not in plugin.config.data["push_groups"], "被拒时配置没被改")
+    return ok
+
+
 async def live_tests(tel: str, pwd: str) -> bool:
-    print("\n== 14. 真实链路：bind → query → 巡检 ==")
+    print("\n== 14. 真实链路：login → bind → query → 巡检 ==")
     rooms = json.loads(os.environ.get("LEYUN_ROOMS") or "[]")
     if not rooms:
         print("  跳过：设环境变量 LEYUN_ROOMS='[{...}]' 再跑（房间 ID 因人而异）")
@@ -444,11 +479,15 @@ async def live_tests(tel: str, pwd: str) -> bool:
     print("  " + text.replace("\n", "\n  "))
     ok = check("查询成功" in text and "❌" not in text, "真实查到余额")
 
-    text = await cmds["leyun.bind"](Params(tel=tel, password=pwd), Event())
+    text = await cmds["leyun.login"](Params(tel=tel, password=pwd), Event())
     print("  " + text.replace("\n", "\n  "))
-    ok &= check("绑定成功" in text, "bind 走通并写回账号")
+    ok &= check("登录成功" in text, "login 走通并写回账号")
     ok &= check(plugin.config.data["account"]["tel"] == tel, "账号已落配置")
-    ok &= check(plugin.config.data["owner_users"] == ["10001"], "首次 bind 认领 owner")
+    ok &= check(plugin.config.data["owner_users"] == ["10001"], "首次 login 认领 owner")
+
+    text = await cmds["leyun.bind"](Params(group=""), Event(group_id="100200300"))
+    print("  " + text.replace("\n", "\n  "))
+    ok &= check(plugin.config.data["push_groups"] == ["100200300"], "bind 绑群写回")
     return ok
 
 
@@ -458,6 +497,7 @@ async def main() -> int:
     ok &= await patrol_tests()
     ok &= await template_tests()
     ok &= await verify_tests()
+    ok &= await bind_tests()
     if "--live" in sys.argv:
         idx = sys.argv.index("--live")
         ok &= await live_tests(sys.argv[idx + 1], sys.argv[idx + 2])

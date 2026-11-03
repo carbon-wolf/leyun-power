@@ -30,8 +30,8 @@ async def run(plugin, params) -> str:
     """`/leyun verify [校验码]` 的入口。"""
     tel, pwd = plugin.account()
     if not tel or not pwd:
-        return ("还没绑定账号，没法做校验。\n"
-                "私聊机器人发：/水电 绑定 <手机号> <登录密码>")
+        return ("还没登录账号，没法做校验。\n"
+                "私聊机器人发：/水电 登录 <手机号> <登录密码>")
 
     code = str(getattr(params, "code", "") or "").strip()
     client = plugin.new_client()
@@ -58,7 +58,7 @@ async def run(plugin, params) -> str:
                 "重新发一条校验码：/水电 验证" % e)
     except (LeyunAuthError, LeyunProtocolError) as e:
         return ("❌ 校验失败：%s\n\n"
-                "如果是密码问题，重新绑定一次：/水电 绑定 <手机号> <密码>" % e)
+                "如果是密码问题，重新登录一次：/水电 登录 <手机号> <密码>" % e)
 
     plugin.state.set("user_id", user_id)
     plugin.state.save()

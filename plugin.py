@@ -4,7 +4,8 @@
 对外**只有一个入口**命令组 `leyun`（别名 `水电` / `sd`），下挂四个子命令：
 
 ===========================  ==========================================
-`/leyun bind <手机号> <密码>`  绑定一卡通账号（仅私聊，密码不进群）
+`/leyun login <手机号> <密码>` 登录一卡通账号（仅私聊，密码不进群）
+`/leyun bind [群号]`          把余额提醒绑到群（群里留空=本群）
 `/leyun query`                手动查一次余额
 `/leyun config [子项 ...]`     统一设置入口（阈值/开关/推送目标/间隔/冷却/文案）
 `/leyun scope [子项 ...]`      服务范围白名单（仅私聊·仅超管）
@@ -36,7 +37,7 @@ from .commands import query as query_cmd
 from .commands import setup as setup_cmd
 from .commands import verify as verify_cmd
 from .jobs import patrol as patrol_job
-from .schemas import BindSchema, ConfigSchema, ScopeSchema, VerifySchema
+from .schemas import BindSchema, ConfigSchema, LoginSchema, ScopeSchema, VerifySchema
 from .store import StateStore
 
 # 巡检定时器的唤醒周期（秒）。真正的巡检间隔由 config.check_interval 决定，
@@ -130,10 +131,10 @@ class LeyunPowerPlugin(PluginBase):
         tel, _ = self.account()
         if not tel:
             self.logger.warning(
-                "[leyun_power] 还没绑定账号：私聊机器人发 /水电 绑定 <手机号> <密码>")
+                "[leyun_power] 还没登录账号：私聊机器人发 /水电 登录 <手机号> <密码>")
         if not any(self.push_targets()):
             self.logger.warning(
-                "[leyun_power] 还没有推送目标：把机器人拉进群后发 /水电 设置 本群")
+                "[leyun_power] 还没有推送目标：把机器人拉进群后发 /水电 绑定")
         groups, users = self._scope_lists()
         if not groups and not users:
             self.logger.warning(
@@ -168,10 +169,18 @@ class LeyunPowerPlugin(PluginBase):
         async def cmd_root(packet):
             return None
 
+        async def cmd_login(params, event):
+            # 登录**不过服务范围那道闸门**：它是「认领 / 开通」动作，新装机时
+            # 白名单本来就是空的，先拦一道只会让人永远登不进来。权限改由
+            # owner 名单把关（见 setup.login），框架层的 scope="private"
+            # 仍然保证密码只可能在私聊里出现。
+            return await setup_cmd.login(self, params, event)
+
         async def cmd_bind(params, event):
-            if _denied(event):
-                return None
-            return await setup_cmd.bind(self, params, event)
+            # 绑群**故意不过服务范围那道闸门**：它的作用就是「开通这个群」，
+            # 先被「名单里没这个群」挡下来会变成「绑完还是用不了」的死结。
+            # 权限改由 owner 名单把关（见 setup.bind_group）。
+            return await setup_cmd.bind_group(self, params, event)
 
         async def cmd_query(packet):
             if _denied(getattr(packet, "event", None)):
@@ -184,8 +193,8 @@ class LeyunPowerPlugin(PluginBase):
             return await setup_cmd.config(self, params, event)
 
         async def cmd_verify(params, event):
-            if _denied(event):
-                return None
+            # 同 login：校验是「把账号登通」的一环，白名单为空时也得能用，
+            # 否则新装机永远卡在 9006 上。scope="private" 保证校验码不进群。
             return await verify_cmd.run(self, params)
 
         async def cmd_scope(params, event):
@@ -198,11 +207,18 @@ class LeyunPowerPlugin(PluginBase):
             description="乐云一卡通水电费：定时巡检 + 余额不足提醒")(cmd_root)
 
         # 中文别名不是锦上添花：插件自己的回执/日志/README 全部写的是
-        # `/水电 绑定 …`、`/水电 设置 …`，不声明这些别名，用户照着做会落到
+        # `/水电 登录 …`、`/水电 绑定`，不声明这些别名，用户照着做会落到
         # `/help leyun`（子命令名不认识 -> 帮助页），等于「按提示操作没反应」。
         self.register_command(
-            "leyun.bind", schema=BindSchema, scope="private", aliases=["绑定"],
-            description="绑定一卡通账号（仅私聊，密码不会进群）")(cmd_bind)
+            "leyun.login", schema=LoginSchema, scope="private", aliases=["登录"],
+            description="登录一卡通账号（仅私聊，密码不会进群）")(cmd_login)
+
+        # 「绑群」和「登录」是两件事：前者定提醒发到哪，后者定用谁的身份查。
+        # scope 放开到 all，因为绑群这个动作本身就要在群里发。
+        self.register_command(
+            "leyun.bind", schema=BindSchema, scope="all", aliases=["绑定"],
+            description="把余额提醒绑到群：在群里发即绑本群，私聊需带群号")(
+            cmd_bind)
 
         self.register_command(
             "leyun.query", scope="all", aliases=["查询"],
@@ -445,8 +461,8 @@ class LeyunPowerPlugin(PluginBase):
         if any(VERIFY_MARK in str(e) for e in errors):
             return "在私聊里发 /水电 验证 发校验码，再 /水电 验证 <6位码> 提交"
         tel, _ = self.account()
-        return ("账号密码已配置，正常会自动重登；若持续失败请重新 /水电 绑定"
-                if tel else "还没绑定账号，私聊发 /水电 绑定 <手机号> <密码>")
+        return ("账号密码已配置，正常会自动重登；若持续失败请重新 /水电 登录"
+                if tel else "还没登录账号，私聊发 /水电 登录 <手机号> <密码>")
 
     async def query_all(self) -> list:
         """查全部房间，返回 `[(room, bill|None, err|None), ...]`。

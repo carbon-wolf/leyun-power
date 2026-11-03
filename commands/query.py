@@ -73,12 +73,12 @@ def remind_hint(plugin, results: list) -> str:
     blocked = []
     tel, pwd = plugin.account()
     if not tel or not pwd:
-        blocked.append("· 还没绑定账号（私聊 /水电 绑定 <手机号> <密码>）")
+        blocked.append("· 还没登录账号（私聊 /水电 登录 <手机号> <密码>）")
     if not plugin.config.get("enabled", True):
         blocked.append("· 自动巡检是关的（发 /水电 设置 开）")
     groups, users = plugin.push_targets()
     if not groups and not users:
-        blocked.append("· 没有推送目标（在群里发 /水电 设置 本群，"
+        blocked.append("· 没有推送目标（在群里发 /水电 绑定，"
                        "或 /水电 设置 私聊 <你的QQ>）")
     if blocked:
         return ("⚠️ %s 已低于阈值，但现在不会提醒：\n%s"
@@ -99,8 +99,8 @@ async def run(plugin) -> str:
     """`/leyun query` 的入口。"""
     tel, _ = plugin.account()
     if not tel:
-        return ("还没绑定账号。\n"
-                "私聊机器人发：/水电 绑定 <手机号> <登录密码>\n"
+        return ("还没登录账号。\n"
+                "私聊机器人发：/水电 登录 <手机号> <登录密码>\n"
                 "（也可以直接编辑 config.json → plugins.leyun_power.account）")
     try:
         results = await plugin.query_all()

@@ -23,16 +23,18 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 
 ```
 ① 填 rooms（房间编号因学校/楼栋而异，见「房间怎么填」），/reload leyun_power
-② 私聊机器人：/水电 绑定 <手机号> <登录密码>
+② 私聊机器人：/水电 登录 <手机号> <登录密码>
    如果回「需要短信校验」→ /水电 验证 → 收到码 → /水电 验证 <6位码>
 ③ 把机器人拉进宿舍群
-④ 群里发一次：/水电 设置 本群
+④ 群里发一次：/水电 绑定
 ```
 
 之后不用管了：每 30 分钟查一次电费 + 水费，低于阈值自动推到那个群，同一项 6 小时内
 不重复刷屏。
 
-> `/水电 绑定` 和 `/水电 验证` 只能私聊用：密码和校验码发在群里会留痕。
+> **登录**和**绑群**是两件事：`/水电 登录` 决定用谁的身份查（仅私聊，密码不留痕），
+> `/水电 绑定` 决定提醒发到哪个群（群里发即绑当前群，也可以私聊 `/水电 绑定 <群号>`）。
+> `/水电 验证` 同样只在私聊用，校验码不会进群。
 
 ## 命令
 
@@ -42,11 +44,16 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 | 命令 | 作用域 | 说明 |
 |---|---|---|
 | `/leyun` / `/水电` / `/sd` | — | 裸调由框架重定向到 `/help leyun` |
-| `/leyun bind <手机号> <登录密码>` | 仅私聊 | 绑定账号，成功后立刻返回当前余额 |
+| `/leyun login <手机号> <登录密码>` | 仅私聊 | 登录一卡通账号，成功后立刻返回当前余额 |
+| `/leyun bind [群号]` | 群聊 / 私聊 | 把余额提醒绑到群：群里留空=本群，私聊要带群号 |
 | `/leyun verify [校验码]` | 仅私聊 | 新设备登录的短信校验：不带码=发送，带码=提交 |
 | `/leyun query` | 所有场景 | 手动查一次余额 |
 | `/leyun config [子项 ...]` | — | **统一设置入口**，见下表 |
 | `/leyun scope [子项 ...]` | 仅私聊·仅超管 | **服务范围白名单**（谁能用），见「服务范围」 |
+
+`/水电 绑定` 会把该群同时写进服务范围（`binding.groups`），所以绑完就能在群里直接
+查询 / 设置，不用再手工开白名单。要换群就在新群里再发一次，取消用
+`/水电 设置 移群 <群号>`。
 
 `config` 的子项（空格分隔，全角半角都认）：
 
@@ -56,8 +63,8 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 | `/水电 设置 电 10` | 电费低于 10 元提醒 |
 | `/水电 设置 水 5` | 水费低于 5 元提醒 |
 | `/水电 设置 开` / `关` | 开关自动巡检 |
-| `/水电 设置 本群` | 把当前群设为提醒群（在群里发） |
-| `/水电 设置 群 100200300` | 指定群号为提醒群 |
+| `/水电 设置 本群` | 等价于在群里发 `/水电 绑定`（老写法，保留兼容） |
+| `/水电 设置 群 100200300` | 等价于 `/水电 绑定 100200300` |
 | `/水电 设置 私聊 10001` | 额外私聊提醒某个 QQ |
 | `/水电 设置 移群 100200300` | 移出提醒群（`移群 本群` 移当前群） |
 | `/水电 设置 移私聊 10001` | 移出私聊提醒 |
@@ -67,7 +74,7 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 | `/水电 设置 模板` | 查看当前文案 + 可用变量表 |
 | `/水电 设置 模板 默认` | 恢复内置默认文案 |
 | `/水电 设置 失败模板 <文案>` | 自定义「查询失败」提醒的文案 |
-| `/水电 设置 预览` | 用实时余额（未绑定则示例数据）渲染一遍看效果 |
+| `/水电 设置 预览` | 用实时余额（未登录则示例数据）渲染一遍看效果 |
 
 ## 房间怎么填
 
@@ -140,13 +147,16 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 
 - **空 = 谁都不用**：名单为空时群聊/私聊一律静默（连 `/help` 里都看不到本插件），
   不拿框架的 `bound_groups`（「机器人监听哪些群」）兜底；
+  例外是「开通动作」：`/水电 登录`、`/水电 验证`、`/水电 绑定` 不受名单限制，
+  否则新装机谁都登不进来、也绑不了第一个群；
 - **分通道判**：群聊与群小窗按**来源群**，直接私聊按 **QQ**，互不代替；
 - **超管恒可用**：改名单的命令只在私聊由超管执行，不豁免会出现「名单配错 → 谁都改不了」；
 - **升级不跳变**：老部署第一次补出 `binding` 时，会把 `owner_users` 带进私聊名单，
   之后只认名单（删掉不会被加回来）。
 
 > 管理员（`owner_users`）能改阈值/推送，但**不自动拥有**服务范围豁免；
-> 开群/开人要么超管发 `/水电 范围 …`，要么手改 `config.json` 的 `binding`。
+> 开群/开人要么超管发 `/水电 范围 …`，要么在群里发一次 `/水电 绑定`，
+> 要么手改 `config.json` 的 `binding`。
 
 ## 提醒文案（可自定义）
 
@@ -246,12 +256,13 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 }
 ```
 
-- `account`：`/leyun bind` 写入；也可以手工预置。密码是**明文**，这个文件别提交到公开仓库。
+- `account`：`/leyun login` 写入；也可以手工预置。密码是**明文**，这个文件别提交到公开仓库。
 - `session`：平台应用级凭据，内置于 `api.py`，一般不用动。查询报「鉴权失败」时才需要
   更新（见「免维护说明」）。
-- `owner_users`：能改设置、能重新绑定的 QQ。留空 = 第一次 `/leyun bind` 的人自动认领；
+- `owner_users`：能改设置、能重新登录的 QQ。留空 = 第一次 `/leyun login` 的人自动认领；
   想锁死就先在配置里填上自己。
 - `binding`：**服务范围白名单**（谁能用命令）。空 = 谁都不用，超管豁免。
+  例外：`login` / `verify` / `bind` 是「开通」动作，不受这道闸门限制。
 - `threshold`：键是 `pay_proj_type`，`322`=水费、`323`=电费。
 - `rooms`：见「房间怎么填」。
 - `check_interval`：秒。定时器每 60 秒醒一次，到点才真巡检，所以改这个值立刻生效。
@@ -265,7 +276,9 @@ pip install -r plugins/leyun_power/requirements.txt   # cryptography + aiohttp
 - **服务范围（能不能用）**：`binding` 白名单。名单外的群/人发命令**静默**，
   `/help` 里也看不到本插件；超管恒可用。
 - **插件权限（能改什么）**：
-  - `bind` / `verify` 仅私聊（密码、校验码不进群），且 `bind` 受 `owner_users` 限制；
+  - `login` / `verify` 仅私聊（密码、校验码不进群），且 `login` 受 `owner_users` 限制；
+  - `bind` 群聊 / 私聊都能发（群里留空=当前群），受 `owner_users` 限制，
+    成功后自动把该群写进服务范围；
   - `config` 任意场景但校验 `owner_users`，群里只有管理员能改；
   - `scope` 仅私聊·仅超管（框架的 `permission="superuser"`）；
   - `query` 不限权限等级 —— 但**仍要过服务范围**（开通的群里室友都能看余额）。
@@ -292,7 +305,7 @@ plugins/leyun_power/
 ├── store.py           # data/state.json
 ├── commands/
 │   ├── query.py       # /leyun query 与排版（巡检复用）
-│   ├── setup.py       # /leyun bind + /leyun config + /leyun scope
+│   ├── setup.py       # /leyun login + /leyun bind + /leyun config + /leyun scope
 │   └── verify.py      # /leyun verify（9006 短信校验）
 ├── jobs/
 │   └── patrol.py      # 巡检与阈值判断
