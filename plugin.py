@@ -523,6 +523,12 @@ class LeyunPowerPlugin(PluginBase):
             return 1 if await self._send_to(event, chain) else 0
 
         groups, users = self.push_targets()
+        if not groups and not users:
+            # 静默返回 0 会让「为什么没提醒」变成一桩悬案，这里必须留一行日志
+            self.logger.warning(
+                "[leyun_power] 有提醒要发，但 push_groups / push_users 都是空的，"
+                "什么都没发出去")
+            return 0
         sent = 0
         for gid in groups:
             try:

@@ -48,7 +48,51 @@ def format_all(plugin, results: list) -> str:
             ok += 1
         else:
             parts.append("%s — ❌ %s" % (room_label(room), err))
-    return "\n\n".join(parts) + "\n\n共 %d/%d 项查询成功" % (ok, len(results))
+    text = "\n\n".join(parts) + "\n\n共 %d/%d 项查询成功" % (ok, len(results))
+    hint = remind_hint(plugin, results)
+    return text + ("\n\n" + hint if hint else "")
+
+
+def remind_hint(plugin, results: list) -> str:
+    """「低于阈值了但没收到提醒」的现场诊断。
+
+    用户对这件事只有两个判断依据：余额数字、有没有收到消息。中间隔着四道闸门
+    （绑定 / 开关 / 推送目标 / 冷却），任何一道关着都表现为「什么都不发」。
+    与其让人去翻日志，不如在查询回执里直接告诉他卡在哪一道。
+    """
+    low = []
+    for room, bill, err in results:
+        if bill is None:
+            continue
+        threshold = plugin.threshold(int(room.get("pay_proj_type") or 0))
+        if threshold > 0 and bill["surplus_amt"] <= threshold:
+            low.append(room_label(room))
+    if not low:
+        return ""
+
+    blocked = []
+    tel, pwd = plugin.account()
+    if not tel or not pwd:
+        blocked.append("· 还没绑定账号（私聊 /水电 绑定 <手机号> <密码>）")
+    if not plugin.config.get("enabled", True):
+        blocked.append("· 自动巡检是关的（发 /水电 设置 开）")
+    groups, users = plugin.push_targets()
+    if not groups and not users:
+        blocked.append("· 没有推送目标（在群里发 /水电 设置 本群，"
+                       "或 /水电 设置 私聊 <你的QQ>）")
+    if blocked:
+        return ("⚠️ %s 已低于阈值，但现在不会提醒：\n%s"
+                % ("、".join(low), "\n".join(blocked)))
+
+    targets = []
+    if groups:
+        targets.append("群 " + "、".join(groups))
+    if users:
+        targets.append("QQ " + "、".join(users))
+    interval = plugin._int_cfg("check_interval", 1800, minimum=60) // 60
+    return ("· 提醒正常：每 %d 分钟巡检一次，余额仍低于阈值就推到 %s\n"
+            "  想立刻试一次效果：/水电 设置 预览"
+            % (interval, " / ".join(targets)))
 
 
 async def run(plugin) -> str:

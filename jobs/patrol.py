@@ -47,17 +47,29 @@ async def check_once(plugin) -> str:
         for key, room, bill in alerts:
             if not _cooled_down(plugin, key, now):
                 continue
-            pushed += await plugin.push(plugin.remind_text(room, bill))
-            plugin.state.set("last_remind", {**(_remind_map(plugin)), key: now})
+            sent = await plugin.push(plugin.remind_text(room, bill))
+            pushed += sent
+            # ⚠️ 只有真发出去才记冷却。以前不管发没发都记，于是「推送群还没配」
+            # 那一轮把时间戳写进去，之后 6 小时一律跳过 —— 用户看到的就是
+            # 「余额明明低于阈值，却一直不提醒」。
+            if sent:
+                plugin.state.set("last_remind", {**(_remind_map(plugin)), key: now})
+            else:
+                plugin.logger.warning(
+                    "[leyun_power] %s 低于阈值但没发出去：没有可用的推送目标"
+                    "（/水电 设置 本群 或 /水电 设置 私聊 <QQ>）",
+                    room.get("label") or room.get("input4", {}).get("name") or "房间")
 
     if errors:
         plugin.state.set("last_err", time.strftime("%m-%d %H:%M") + " " + "；".join(errors))
         if _cooled_down(plugin, "__error__", now):
             # 失败原因决定提示：需要短信校验就直说去哪做，别让用户猜密码是不是错了
-            pushed += await plugin.push(
+            sent = await plugin.push(
                 plugin.error_text(errors, plugin.verify_hint(errors)))
-            plugin.state.set("last_remind", {**(_remind_map(plugin)),
-                                             "__error__": now})
+            pushed += sent
+            if sent:
+                plugin.state.set("last_remind", {**(_remind_map(plugin)),
+                                                 "__error__": now})
     else:
         plugin.state.set("last_err", "")
 
@@ -66,6 +78,8 @@ async def check_once(plugin) -> str:
     summary = "巡检完成：%d 项成功" % (len(results) - len(errors))
     if alerts:
         summary += "，%d 项低于阈值，推送 %d 条" % (len(alerts), pushed)
+        if not pushed and not any(plugin.push_targets()):
+            summary += "（⚠️ 没有推送目标，提醒发不出去）"
     if errors:
         summary += "，%d 项失败" % len(errors)
     return summary

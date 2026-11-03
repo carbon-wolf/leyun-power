@@ -302,6 +302,22 @@ async def patrol_tests() -> bool:
                 "推送用自定义文案（%d 条）" % len(fresh))
     if fresh:
         print("    " + fresh[0][2].replace("\n", "\n    "))
+
+    print("\n== 11b. 没有推送目标时：不吞提醒、不写冷却、补上目标立刻发 ==")
+    bare = make_plugin(account=("10000000000", "000000"), owner=["10001"])
+    await boot(bare)
+    _install_fake_bills(bare)
+    bare.config.data["threshold"] = {"322": 9999.0, "323": 9999.0}
+    bare.state.set("last_remind", {})
+    summary = await patrol.check_once(bare)
+    print("  " + summary)
+    ok &= check(len(bare.sent) == 0 and "没有推送目标" in summary,
+                "无目标时摘要里明说「提醒发不出去」")
+    ok &= check(not bare.state.get("last_remind"),
+                "没发出去就不记冷却：%s" % bare.state.get("last_remind"))
+    bare.config.data["push_groups"] = ["100200300"]
+    await patrol.check_once(bare)
+    ok &= check(len(bare.sent) == 2, "补上推送群后下一轮立刻发出（%d 条）" % len(bare.sent))
     return ok
 
 
