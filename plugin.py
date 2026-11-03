@@ -50,7 +50,7 @@ class LeyunPowerPlugin(PluginBase):
     """乐云一卡通水电费巡检插件。"""
 
     name = "leyun_power"
-    version = "2.3.0"
+    version = "2.4.0"
     description = "乐云一卡通水电费：定时巡检，余额不足自动提醒到群（文案可自定义、可 @全体/个人、支持短信校验）"
     author = "carbon-wolf"
 
