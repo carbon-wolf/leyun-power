@@ -10,6 +10,23 @@
 
 ## 安装
 
+**方式一：从 ncqqpy 插件列表一键装（推荐）**
+
+本插件已收录在官方插件列表 [ncqqpy-plugins](https://github.com/Green1423/ncqqpy-plugins)，
+在 QQ 私聊机器人直接发：
+
+```
+/plugin install leyun_power
+```
+
+装完它会自动拉仓库、装 `requirements.txt`，然后：
+
+```
+/reload leyun_power
+```
+
+**方式二：手动 clone**
+
 ```bash
 cd /path/to/ncqqpy
 git clone https://github.com/carbon-wolf/leyun-power.git plugins/leyun_power
